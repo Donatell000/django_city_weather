@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<title>Погода в городе</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background: #f9f9f9;
+    padding: 20px;
+    color: #333;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+  }
+  a.button {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    padding: 10px 20px;
+    background: #007BFF;
+    color: white;
+    text-decoration: none;
+    border-radius: 5px;
+    font-weight: 600;
+    transition: background-color 0.3s ease;
+    z-index: 1001;
+  }
+  a.button:hover {
+    background: #0056b3;
+  }
+  form, .last-city-block, .weather-info {
+    max-width: 320px;
+    width: 100%;
+    background: white;
+    padding: 15px 20px;
+    border-radius: 5px;
+    box-shadow: 0 2px 6px rgb(0 0 0 / 0.1);
+    margin-bottom: 30px;
+    box-sizing: border-box;
+    text-align: center;
+  }
+  label {
+    font-weight: 600;
+    display: block;
+    margin-bottom: 6px;
+    text-align: left;
+  }
+  .input-wrapper {
+    position: relative;
+    width: 100%;
+    margin-bottom: 10px;
+  }
+  input[type="text"] {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+  }
+  button {
+    background: #28a745;
+    color: white;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 14px;
+    transition: background-color 0.3s ease;
+  }
+  button:hover {
+    background: #1e7e34;
+  }
+  #suggestions, #suggestions_last {
+    border: 1px solid #ccc;
+    max-height: 150px;
+    overflow-y: auto;
+    position: absolute;
+    background: white;
+    width: 100%;
+    top: 100%;
+    left: 0;
+    z-index: 1000;
+    border-radius: 0 0 5px 5px;
+    box-shadow: 0 4px 8px rgb(0 0 0 / 0.1);
+    display: none;
+  }
+  .suggestion-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .suggestion-item:hover {
+    background-color: #eee;
+  }
+  .error-message {
+    color: red;
+    font-weight: 600;
+    margin-bottom: 15px;
+    max-width: 320px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<a href="{% url 'city_stats_api' %}" class="button">Статистика</a>
+
+{% if last_city and show_last_city_block %}
+<div class="last-city-block">
+  <p>Вы в прошлый раз смотрели погоду в <strong>{{ last_city }}</strong>.</p>
+  <form method="post" autocomplete="off" style="margin: 0 auto;">
+    {% csrf_token %}
+    <div class="input-wrapper">
+      <label for="id_city_last">Город:</label>
+      <input type="text" id="id_city_last" name="city" value="{{ last_city }}" autocomplete="off" />
+      <div id="suggestions_last"></div>
+    </div>
+    <button type="submit">Показать снова</button>
+  </form>
+</div>
+<hr>
+{% endif %}
+
+<form method="post" autocomplete="off" style="margin: 0 auto;">
+  {% csrf_token %}
+  <div class="input-wrapper">
+    <label for="id_city">Город:</label>
+    <input type="text" id="id_city" name="city" placeholder="Введите город" value="{{ form.city.value|default_if_none:'' }}" autocomplete="off" />
+    <div id="suggestions"></div>
+  </div>
+  <button type="submit">Показать</button>
+</form>
+
+{% if error %}
+<p class="error-message">{{ error }}</p>
+{% endif %}
+
+{% if weather %}
+<div class="weather-info">
+  <h2>Погода в {{ weather.name }}</h2>
+
+  <p>Температура: {{ weather.main.temp|default:"Нет данных" }}°C</p>
+  <p>Влажность: {{ weather.main.humidity|default:"Нет данных" }}%</p>
+  <p>Скорость ветра: {{ weather.wind.speed|default:"Нет данных" }} м/с</p>
+  <p>Направление ветра: {{ weather.wind.deg|default:"Нет данных" }}°</p>
+  <p>Описание:
+    {% if weather.weather and weather.weather.0.description %}
+      {{ weather.weather.0.description }}
+    {% else %}
+      Нет данных
+    {% endif %}
+  </p>
+</div>
+{% endif %}
+
+<script>
+function setupAutocomplete(inputId, suggestionsId) {
+    const input = document.getElementById(inputId);
+    const suggestions = document.getElementById(suggestionsId);
+    let timeout = null;
+
+    input.addEventListener('input', () => {
+        clearTimeout(timeout);
+        const query = input.value.trim();
+
+        if (query.length < 1) {
+            suggestions.innerHTML = '';
+            suggestions.style.display = 'none';
+            return;
+        }
+
+        timeout = setTimeout(async () => {
+            try {
+                const response = await fetch(`/api/cities/?query=${encodeURIComponent(query)}`);
+                if (!response.ok) throw new Error('Network error');
+
+                const cities = await response.json();
+
+                if (cities.length === 0) {
+                    suggestions.innerHTML = '';
+                    suggestions.style.display = 'none';
+                    return;
+                }
+
+                suggestions.innerHTML = cities.map(city => `
+                    <div class="suggestion-item" data-lat="${city.lat}" data-lon="${city.lon}">${city.name}</div>
+                `).join('');
+                suggestions.style.display = 'block';
+
+                document.querySelectorAll(`#${suggestionsId} .suggestion-item`).forEach(item => {
+                    item.onclick = () => {
+                        input.value = item.textContent;
+                        suggestions.innerHTML = '';
+                        suggestions.style.display = 'none';
+                    };
+                });
+            } catch (error) {
+                suggestions.innerHTML = '';
+                suggestions.style.display = 'none';
+                console.error(error);
+            }
+        }, 150);
+    });
+
+    document.addEventListener('click', (e) => {
+        if (e.target !== input && !suggestions.contains(e.target)) {
+            suggestions.innerHTML = '';
+            suggestions.style.display = 'none';
+        }
+    });
+}
+
+setupAutocomplete('id_city', 'suggestions');
+setupAutocomplete('id_city_last', 'suggestions_last');
+
+</script>
+
+</body>
+</html>
